@@ -1,4 +1,6 @@
 use std::io::{stdout, Write};
+use std::env::args;
+use std::path::Path;
 
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{
@@ -25,11 +27,11 @@ struct Fragment {
 	data: Vec<char>,
 }
 
-fn load_fragments() -> Result<Vec<Fragment>> {
+fn load_fragments<P: AsRef<Path>>(path: P) -> Result<Vec<Fragment>> {
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 
-	let file = BufReader::new(File::open("fragments.txt")?);
+	let file = BufReader::new(File::open(path)?);
 
 	let mut out = Vec::new();
 	for line in file.lines() {
@@ -58,16 +60,21 @@ fn num_shared(buffer: &[char], fragment: &[char]) -> usize {
 }
 
 fn main() -> Result<()> {
-	//let x = "abcdefghijklmnop";
-	//let y = "lmnophuteons";
-	//let x = into_vec_of_chars(x);
-	//let y = into_vec_of_chars(y);
-	//dbg!(num_shared(&x, &y));
+	let mut args = args();
+
+	args.next().expect("no executable name?");
+	let filename = if let Some(filename) = args.next() {
+		filename
+	} else {
+		println!("no fragments file provided?");
+		return Ok(());
+	};
+
 
 	let mut stdout = stdout();
 	let (mut cols, mut rows) = size()?;
 
-	let fragments = load_fragments()?;
+	let fragments = load_fragments(filename)?;
 	let mut hash_map: HashMap<_, usize> = HashMap::new();
 	for fragment in fragments {
 		*hash_map.entry(fragment).or_insert(0) += 1;
