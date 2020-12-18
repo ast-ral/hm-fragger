@@ -1,6 +1,7 @@
 use std::io::{stdout, Write};
 use std::env::args;
 use std::path::Path;
+use std::fmt::{self, Display, Formatter};
 
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{
@@ -13,7 +14,6 @@ use crossterm::terminal::{
 	size,
 };
 use crossterm::event::{self, Event, KeyEvent, KeyCode, KeyModifiers};
-use crossterm::Result;
 use crossterm::style::{style, Color, Print, PrintStyledContent};
 use crossterm::QueueableCommand;
 use crossterm::cursor::MoveTo;
@@ -27,7 +27,20 @@ struct Fragment {
 	data: Vec<char>,
 }
 
-fn load_fragments<P: AsRef<Path>>(path: P) -> Result<Vec<Fragment>> {
+#[derive(Copy, Clone)]
+struct CharWriter<'a>(&'a [char]);
+
+impl<'a> Display for CharWriter<'a> {
+	fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+		for char in self.0 {
+			char.fmt(f)?;
+		}
+
+		Ok(())
+	}
+}
+
+fn load_fragments<P: AsRef<Path>>(path: P) -> crossterm::Result<Vec<Vec<char>>> {
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 
@@ -35,13 +48,8 @@ fn load_fragments<P: AsRef<Path>>(path: P) -> Result<Vec<Fragment>> {
 
 	let mut out = Vec::new();
 	for line in file.lines() {
-		out.push(Fragment {
-			shared: 0,
-			count: 0,
-			data: line?.chars().collect(),
-		});
+		out.push(line?.chars().collect());
 	}
-
 	Ok(out)
 }
 
@@ -59,7 +67,7 @@ fn num_shared(buffer: &[char], fragment: &[char]) -> usize {
 	return 0;
 }
 
-fn main() -> Result<()> {
+fn main() -> crossterm::Result<()> {
 	let mut args = args();
 
 	args.next().expect("no executable name?");
@@ -70,6 +78,7 @@ fn main() -> Result<()> {
 		return Ok(());
 	};
 
+	// initial setup
 
 	let mut stdout = stdout();
 	let (mut cols, mut rows) = size()?;
@@ -80,9 +89,12 @@ fn main() -> Result<()> {
 		*hash_map.entry(fragment).or_insert(0) += 1;
 	}
 	let mut fragments = Vec::new();
-	for (mut key, value) in hash_map {
-		key.count = value;
-		fragments.push(key);
+	for (key, value) in hash_map {
+		fragments.push(Fragment {
+			data: key,
+			count: value,
+			shared: 0,
+		});
 	}
 
 	stdout.execute(EnterAlternateScreen)?;
@@ -136,19 +148,15 @@ fn main() -> Result<()> {
 		let max_col = (cols as usize).saturating_sub(max_size);
 		let start = edit_buffer.len().saturating_sub(max_col);
 		let cursor_col = max_col.min(edit_buffer.len());
-		// todo: get rid of this allocation
-		let string: String = (&edit_buffer[start ..]).iter().collect();
+
 		stdout.queue(MoveTo(0, 0))?;
-		stdout.queue(Print(string))?;
+		stdout.queue(Print(CharWriter(&edit_buffer[start ..])))?;
 
 		for i in 1 .. rows {
 			if let Some(fragment) = fragments_iter.next() {
 				stdout.queue(MoveTo((cursor_col - fragment.shared) as u16, i))?;
-				// todo: get rid of this allocation
-				let count = fragment.count;
-				let mut fragment: String = fragment.data.iter().collect();
-				fragment += &format!(" ({:02})", count.min(99));
-				stdout.queue(Print(fragment))?;
+				stdout.queue(Print(CharWriter(&fragment.data)))?;
+				stdout.queue(Print(format!(" ({:02})", fragment.count.min(99))))?;
 			} else {
 				break;
 			}
@@ -160,8 +168,7 @@ fn main() -> Result<()> {
 	disable_raw_mode()?;
 	stdout.execute(LeaveAlternateScreen)?;
 
-	// todo: get rid of this allocation
-	println!("{}", edit_buffer.iter().collect::<String>());
+	println!("{}", CharWriter(&edit_buffer));
 
 	Ok(())
 }
